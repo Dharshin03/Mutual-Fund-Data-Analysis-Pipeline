@@ -1,0 +1,44 @@
+import boto3
+import os
+from botocore.exceptions import ClientError
+
+def lambda_handler(event, context):
+    s3_client = boto3.client('s3')
+    sns_client = boto3.client('sns')
+    
+    # Getting the bucket name and the file key from the event
+    bucket_name = event['Records'][0]['s3']['bucket']['name']
+    file_key = event['Records'][0]['s3']['object']['key']
+
+    try:
+        s3_response = s3_client.get_object(Bucket=bucket_name, Key=file_key)
+        file_content = s3_response['Body'].read().decode('utf-8')
+        logger.info(f"File content successfully retrieved from S3: {file_key}")
+    except ClientError as e:
+        return {
+            'statusCode': 500,
+            'body': 'Error fetching file from S3'
+        }
+    
+   # SNS message
+    sns_topic_arn = 'arn:aws:sns:ap-south-1:992382612032:daily_load_report'
+    subject = f"File {file_key} Uploaded to S3"
+    message = f"The following file was uploaded to S3:\n\nFile: {file_key}\n\nContent:\n{file_content}"
+    
+    try:
+        # Publish to SNS
+        response = sns_client.publish(
+            TopicArn=sns_topic_arn,
+            Subject=subject,
+            Message=message
+        )
+    except ClientError as e:
+        return {
+            'statusCode': 500,
+            'body': 'Error sending SNS message'
+        }
+
+    return {
+        'statusCode': 200,
+        'body': f'SNS message sent successfully with file {file_key}'
+    }
