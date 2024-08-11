@@ -1,0 +1,8 @@
+,0
+schemeCode,int64
+schemeName,object
+fund_house,object
+scheme_type,object
+scheme_category,object
+date,datetime64[us]
+nav,float64
