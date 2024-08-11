@@ -1,0 +1,159 @@
+import requests
+import pandas as pd
+from datetime import datetime, timedelta
+import boto3
+import time  
+# For making load report
+errors = []
+success = True
+start_time = time.time()
+
+# Get the list of all mutual fund schemes
+all_schemes_url = "https://api.mfapi.in/mf"
+
+try:
+    response = requests.get(all_schemes_url)
+    if response.status_code == 200:
+        all_schemes = response.json()
+    else:
+        raise Exception("Failed to fetch the list of schemes")
+except Exception as e:
+    errors.append(str(e))
+    success = False
+    all_schemes = []
+
+# Fetch data up to today. If we are fetching the data today we'll have data only upto yesterday
+day = (datetime.today() - timedelta(days=1)).strftime('%d-%m-%Y')
+daily_data = []
+
+schemes_to_fetch = all_schemes[0:]
+total_schemes = len(schemes_to_fetch)
+
+for i, scheme in enumerate(schemes_to_fetch, start=1):
+    scheme_code = scheme['schemeCode']
+    historical_data_url = f"https://api.mfapi.in/mf/{scheme_code}"
+
+    try:
+        response = requests.get(historical_data_url)
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data:
+                for entry in data['data']:
+                    if entry['date'] == day:
+                        entry['schemeCode'] = scheme_code
+                        entry['schemeName'] = data['meta']['scheme_name']
+                        entry['fund_house'] = data['meta']['fund_house']
+                        entry['scheme_type'] = data['meta']['scheme_type']
+                        entry['scheme_category'] = data['meta']['scheme_category']
+                        daily_data.append(entry)
+            print(f"Processed {scheme_code}: {i}/{total_schemes}")
+        else:
+            raise Exception(f"Failed to fetch data for scheme: {scheme_code}")
+    except Exception as e:
+        errors.append(str(e))
+        success = False
+df = pd.DataFrame(daily_data)
+df = df[['schemeCode', 'schemeName', 'fund_house', 'scheme_type', 'scheme_category', 'date', 'nav']]
+
+# Data Cleansing
+
+df.drop_duplicates(subset=['schemeCode','schemeName','fund_house','scheme_type','scheme_category','date','nav'], inplace=True)
+df.dropna(how='any', inplace=True)
+df['date'] = pd.to_datetime(df['date'], errors='coerce', dayfirst=True)
+df = df.sort_values(by='date', ascending=False)
+
+# Clean scheme_category
+
+def categorize_scheme_category(scheme):
+    if 'Debt Scheme' in scheme:
+        return 'Debt Scheme'
+    elif 'Equity Scheme' in scheme:
+        return 'Equity Scheme'
+    elif 'Hybrid Scheme' in scheme:
+        return 'Hybrid Scheme'
+    elif 'Other Scheme' in scheme:
+        return 'Other Scheme'
+    elif 'Solution Oriented Scheme' in scheme:
+        return 'Solution Oriented Scheme'
+    elif any(keyword in scheme for keyword in ['Days', 'Plan', 'Daily', 'Half Yearly', 'Annual', 'Compulsory']):
+        return 'Duration/Plan'
+    elif 'Direct' in scheme or 'Payout' in scheme:
+        return 'Direct/Payout'
+    elif 'IDF' in scheme or 'Growth' in scheme or 'Liquid' in scheme:
+        return 'IDF/Growth/Liquid'
+    else:
+        return 'Uncategorized'
+
+df['scheme_category'] = df['scheme_category'].apply(categorize_scheme_category)
+
+# Clean scheme_type
+
+def categorize_scheme_type(scheme):
+    if 'Mutual Fund' in scheme:
+        return 'Mutual Fund'
+    elif 'Open Ended' in scheme:
+        return 'Open Ended Scheme'
+    elif 'Close Ended' in scheme:
+        return 'Close Ended Scheme'
+    elif 'Interval Fund' in scheme:
+        return 'Interval Fund'
+    elif 'Debt' in scheme or 'FMP' in scheme:
+        return 'Debt Scheme'
+    elif 'Hybrid' in scheme:
+        return 'Hybrid Scheme'
+    elif 'Equity' in scheme:
+        return 'Equity Scheme'
+    elif 'Index Fund' in scheme:
+        return 'Index Fund'
+    elif 'Liquid' in scheme or 'Ultra Short Duration' in scheme:
+        return 'Liquid/Ultra Short Duration Fund'
+    elif 'Plan' in scheme or 'Days' in scheme:
+        return 'Plan/Duration'
+    else:
+        return 'Uncategorized'
+df['scheme_type'] = df['scheme_type'].apply(categorize_scheme_type)
+
+# Upload CSV file to S3 bucket
+
+csv_file_path = f"mf-{day}.csv"
+df.to_csv(csv_file_path, index=False)
+s3_bucket_name = 'fetchfromapi'
+s3_file_key = f'dailydata/mf-{day}.csv'
+s3_client = boto3.client('s3')
+
+try:
+    s3_client.upload_file(csv_file_path, s3_bucket_name, s3_file_key)
+    print(f"File '{csv_file_path}' uploaded to S3 bucket '{s3_bucket_name}' with key '{s3_file_key}'")
+except Exception as e:
+    errors.append(f"Failed to upload file to S3: {e}")
+    success = False
+
+# Generate daily load summary report
+end_time = time.time()
+execution_time = end_time - start_time
+total_records = len(df)
+summary_lines = [
+    f"Daily Load Summary Report - {day}",
+    "="*40,
+    f"Total Records Fetched: {total_records}",
+    f"Execution Time: {execution_time:.2f} seconds",
+    f"Success Status: {'Success' if success else 'Failure'}",
+    f"Data File Location: s3://{s3_bucket_name}/{s3_file_key}",
+    "Errors Encountered:",
+    "\n".join(errors) if errors else "No errors encountered",
+    "="*40
+]
+summary_report = "\n".join(summary_lines)
+
+# Store summary report file into a S3 bucket
+summary_file_path = f"daily_report-{day}.txt"
+with open(summary_file_path, 'w') as f:
+    f.write(summary_report)
+summary_s3_file_key = f'dailyreport/daily_report-{day}.txt'
+try:
+    s3_client.upload_file(summary_file_path, s3_bucket_name, summary_s3_file_key)
+    print(f"Summary report '{summary_file_path}' uploaded to S3 bucket '{s3_bucket_name}' with key '{summary_s3_file_key}'")
+except Exception as e:
+    print(f"Failed to upload summary report to S3: {e}")
+
+print("The daily MF data and summary report have been exported successfully")
