@@ -1,0 +1,62 @@
+import requests
+import pandas as pd
+import boto3
+
+#Get the list of all mutual fund schemes
+all_schemes_url = "https://api.mfapi.in/mf"
+
+response = requests.get(all_schemes_url)
+if response.status_code == 200:
+    all_schemes = response.json()
+else:
+    print("Failed to fetch the list of schemes")
+    all_schemes = []
+
+#Fetch historical data for all schemes (This is only for uploading. Actually it was divided into 6 sets)
+historical_data = []
+
+schemes_to_fetch = all_schemes[0:] # Only for reference. Slicing was used in real time
+total_schemes = len(schemes_to_fetch)
+
+for i, scheme in enumerate(schemes_to_fetch, start=1):
+    scheme_code = scheme['schemeCode']
+    historical_data_url = f"https://api.mfapi.in/mf/{scheme_code}"
+
+    response = requests.get(historical_data_url)
+    if response.status_code == 200:
+        data = response.json()
+        if 'data' in data:
+            for entry in data['data']:
+                entry['schemeCode'] = scheme_code
+                entry['schemeName'] = data['meta']['scheme_name']
+                entry['fund_house'] = data['meta']['fund_house']
+                entry['scheme_type'] = data['meta']['scheme_type']
+                entry['scheme_category'] = data['meta']['scheme_category']
+                historical_data.append(entry)
+        print(f"Processed {scheme_code}: {i}/{total_schemes}") # This line can be used to check the status of data fetch
+    else:
+        print(f"Failed to fetch data for scheme: {scheme_code}")
+
+# Convert the historical data into a DataFrame
+df = pd.DataFrame(historical_data)
+
+# Rearrange columns
+df = df[['schemeCode', 'schemeName', 'fund_house', 'scheme_type', 'scheme_category', 'date', 'nav']]
+
+# Store CSV locally
+csv_file_path = "mf1.csv"
+df.to_csv(csv_file_path, index=False)
+
+# Upload CSV file to S3 bucket
+s3_bucket_name = 'fetchfromapi'
+s3_file_key = 'data/mf1.csv'
+
+s3_client = boto3.client('s3')
+try:
+    s3_client.upload_file(csv_file_path, s3_bucket_name, s3_file_key)
+    print(f"File '{csv_file_path}' uploaded to S3 bucket '{s3_bucket_name}' with key '{s3_file_key}'")
+except Exception as e:
+    print(f"Failed to upload file to S3: {e}")
+
+print("The data has been exported successfully")
+
