@@ -65,26 +65,37 @@ df = df.sort_values(by='date', ascending=False)
 # Clean scheme_category
 
 def categorize_scheme_category(scheme):
-    if 'Debt Scheme' in scheme:
-        return 'Debt Scheme'
-    elif 'Equity Scheme' in scheme:
-        return 'Equity Scheme'
-    elif 'Hybrid Scheme' in scheme:
-        return 'Hybrid Scheme'
-    elif 'Other Scheme' in scheme:
-        return 'Other Scheme'
-    elif 'Solution Oriented Scheme' in scheme:
-        return 'Solution Oriented Scheme'
-    elif any(keyword in scheme for keyword in ['Days', 'Plan', 'Daily', 'Half Yearly', 'Annual', 'Compulsory']):
-        return 'Duration/Plan'
-    elif 'Direct' in scheme or 'Payout' in scheme:
-        return 'Direct/Payout'
-    elif 'IDF' in scheme or 'Growth' in scheme or 'Liquid' in scheme:
-        return 'IDF/Growth/Liquid'
+    scheme = scheme.lower()
+    if 'direct' in scheme or 'regular' in scheme:
+        return 'Direct/Regular'
+    elif 'quarterly' in scheme or 'yearly' in scheme or 'monthly' in scheme:
+        return 'Time Based'
+    elif 'growth' in scheme or 'idcw' in scheme:
+        return 'Growth/IDCW'
+    elif 'etf' in scheme:
+        return 'Exchange Traded Funds'
+    elif 'short duration' in scheme or 'silver exchange' in scheme or 'gold exchange' in scheme or 'midcap 150 exchange' in scheme:
+        return 'Short Duration/Exchange-Traded'
+    elif bool(re.search(r'\b\d{4}d\b', scheme)) or '3 years' in scheme:
+        return 'Greater than 3 Years'
+    elif bool(re.search(r'\b\d{1,3}d\b', scheme)) or '1 year' in scheme:
+        return 'Less than 3 Years'
+    elif 'tax saving' in scheme:
+        return 'Tax Saving'
+    elif 'retirement benefit' in scheme:
+        return 'Retirement Benefit'
+    elif 'child welfare' in scheme:
+        return 'Child Welfare'
+    elif 'arbitrage' in scheme:
+        return 'Arbitrage'
+    elif 'overseas' in scheme:
+        return 'Overseas Funds'
+    elif 'fund of funds' in scheme:
+        return 'Fund of Funds'
     else:
-        return 'Uncategorized'
+        return 'Other'
 
-df['scheme_category'] = df['scheme_category'].apply(categorize_scheme_category)
+df['scheme_category'] = df['schemeName'].apply(categorize_scheme_category)
 
 # Clean scheme_type
 
@@ -112,6 +123,41 @@ def categorize_scheme_type(scheme):
     else:
         return 'Uncategorized'
 df['scheme_type'] = df['scheme_type'].apply(categorize_scheme_type)
+
+# Scheme sub-category
+def scheme_sub_category(scheme):
+    scheme = scheme.lower()  # Convert to lowercase for case-insensitive comparison
+    if 'direct' in scheme:
+        return 'Direct'
+    elif 'regular' in scheme:
+        return 'Regular'
+    elif 'quarterly' in scheme:
+        return 'Quarterly'
+    elif 'yearly' in scheme:
+        return 'Yearly'
+    elif 'monthly' in scheme:
+        return 'Monthly'
+    elif 'growth' in scheme:
+        return 'Growth'
+    elif 'etf' in scheme:
+        return 'ETF'
+    elif 'idcw' in scheme:
+        return 'IDCW'
+    elif 'short duration' in scheme:
+        return 'Short duration'
+    elif 'silver exchange' in scheme:
+        return 'Silver exchange'
+    elif 'gold exchange' in scheme:
+        return 'Gold exchange'
+    elif 'midcap 150 exchange' in scheme:
+        return 'Midcap 150 exchange'
+    elif bool(re.search(r'\b\d{4}d\b', scheme)) or '3 years' in scheme:
+        return 'Greater_than_3_years'
+    elif bool(re.search(r'\b\d{1,3}d\b', scheme)) or '1 year' in scheme:
+        return 'Less_than_3_years'
+    else:
+        return 'Other'
+df['scheme_sub_category'] = df['schemeName'].apply(scheme_sub_category)
 
 # Upload CSV file to S3 bucket
 
