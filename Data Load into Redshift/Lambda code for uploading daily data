@@ -1,17 +1,23 @@
 import boto3
 import psycopg2
 import logging
+import datetime
 
-# Set up logging to view the status of redshift connection and data uploading
+# Set up logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
+    conn = None
+    cur = None
+    
     try:
+        # Extract bucket name and key from the event
         bucket_name = event['Records'][0]['s3']['bucket']['name']
         file_key = event['Records'][0]['s3']['object']['key']
         logger.info(f"Processing file: s3://{bucket_name}/{file_key}")
 
+        # S3 client
         s3 = boto3.client('s3')
         obj = s3.get_object(Bucket=bucket_name, Key=file_key)
         csv_data = obj['Body'].read().decode('utf-8')
@@ -28,11 +34,15 @@ def lambda_handler(event, context):
         cur = conn.cursor()
         logger.info("Successfully connected to Redshift")
 
-        # Upload data to historic data table
+        # Get the record count before loading
+        cur.execute("SELECT COUNT(*) FROM historicdata;")
+        before_count = cur.fetchone()[0]
+
+        # Copy CSV data to the first table in Redshift
         copy_cmd_1 = f"""
         COPY historicdata
         FROM 's3://{bucket_name}/{file_key}'
-        CREDENTIALS 'aws_access_key_id=access_key;aws_secret_access_key=secret_access_key' # the access keys have been changed due to upload issues
+        # Access key credentials removed due to upload issue:
         CSV
         IGNOREHEADER 1;
         """
@@ -40,11 +50,20 @@ def lambda_handler(event, context):
         conn.commit()
         logger.info("Data successfully loaded into table 'historicdata'")
 
-        # Upload data to mf data table (data from 2018)
+        # Get the record count after loading
+        cur.execute("SELECT COUNT(*) FROM historicdata;")
+        after_count = cur.fetchone()[0]
+
+        # Calculate the number of records loaded
+        records_loaded = after_count - before_count
+
+        # Repeat the same process for the second table
+
         copy_cmd_2 = f"""
         COPY mfdata
         FROM 's3://{bucket_name}/{file_key}'
-        CREDENTIALS 'aws_access_key_id=access_key;aws_secret_access_key=secret_access_key' # the access keys have been changed due to upload issues
+        #CREDENTIALS 'aws_access_key_id=x;aws_secret_access_key=y'
+        # Access key credentials removed due to upload issue:
         CSV
         IGNOREHEADER 1;
         """
@@ -52,19 +71,57 @@ def lambda_handler(event, context):
         conn.commit()
         logger.info("Data successfully loaded into table 'mfdata'")
 
+
+        # Capture the load report details
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        status = 'Success'
+        error_message = 'NULL'
+
+        # Insert the load report into the load_report table
+        report_cmd = f"""
+        INSERT INTO load_report (file_key, timestamp, status, records_loaded, error_message)
+        VALUES ('{file_key}', '{timestamp}', '{status}', {records_loaded}, {error_message});
+        """
+        cur.execute(report_cmd)
+        conn.commit()
+        logger.info("Load report successfully inserted into 'load_report' table")
+
         cur.close()
         conn.close()
         logger.info("Redshift connection closed successfully")
 
         return {
             'statusCode': 200,
-            'body': 'Data loaded successfully'
+            'body': 'Data loaded successfully and report generated'
         }
 
     except Exception as e:
         logger.error(f"Error processing file: {e}")
+
+        if conn is not None:
+            try:
+                # Capture error details for the load report
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                status = 'Failure'
+                records_loaded = 0
+                error_message = str(e).replace("'", "''")  # Escape single quotes
+
+                # Insert the error load report into the load_report table
+                report_cmd = f"""
+                INSERT INTO load_report (file_key, timestamp, status, records_loaded, error_message)
+                VALUES ('{file_key}', '{timestamp}', '{status}', {records_loaded}, '{error_message}');
+                """
+                cur.execute(report_cmd)
+                conn.commit()
+                logger.info("Error load report successfully inserted into 'load_report' table")
+            except Exception as inner_e:
+                logger.error(f"Error inserting load report: {inner_e}")
+            finally:
+                if cur is not None:
+                    cur.close()
+                conn.close()
+
         return {
             'statusCode': 500,
             'body': f'Error: {e}'
         }
-
