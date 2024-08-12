@@ -1,0 +1,72 @@
+import requests
+import pandas as pd
+from datetime import datetime, timedelta
+import boto3
+# API details
+api_key = 'dc3abe4c8bf6df2a9779929a'
+base_url = 'https://v6.exchangerate-api.com/v6'
+base_currency = 'INR'
+start_date = datetime(2024, 1, 1)
+end_date = datetime.now()
+
+# List of 10 popular currencies (excluding CHF and including AED)
+currencies = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CNY', 'AED', 'SGD', 'ZAR']
+
+# Initialize an empty list to store the results
+data = []
+
+# Loop through each date
+current_date = start_date
+while current_date <= end_date:
+    formatted_date = current_date.strftime('%Y-%m-%d')
+    # API request URL
+    url = f'{base_url}/{api_key}/latest/{base_currency}'
+    
+    response = requests.get(url)
+    if response.status_code == 200:
+        data_json = response.json()
+        if 'conversion_rates' in data_json:
+            rates = data_json['conversion_rates']
+            # Create a row with available data
+            row = {currency: rates.get(currency, None) for currency in currencies}
+            row['Date'] = formatted_date
+            data.append(row)
+        else:
+            print(f"Conversion rates not available for {formatted_date}")
+    
+    # Move to the next day
+    current_date += timedelta(days=1)
+
+# Create a DataFrame
+df = pd.DataFrame(data)
+
+# Ensure the 'Date' column is included and reorder columns to have 'Date' as the first column
+if 'Date' in df.columns:
+    df = df[['Date'] + currencies]
+else:
+    print("Date column is missing in the DataFrame.")
+
+# Convert 'Date' column to datetime format and sort in descending order
+df['Date'] = pd.to_datetime(df['Date'])
+df = df.sort_values(by='Date', ascending=False)
+
+# Convert 'Date' column to datetime format and sort in descending order
+df['Date'] = pd.to_datetime(df['Date'])
+df = df.sort_values(by='Date', ascending=False)
+
+
+csv_file_path = "exchange_rates_INR.csv"
+df.to_csv(csv_file_path, index=False)
+
+#Upload CSV file to S3 bucket
+s3_bucket_name = 'fetchfromapi'
+s3_file_key = 'exchange_rate/exchange_rates_INR.csv'
+
+s3_client = boto3.client('s3')
+try:
+    s3_client.upload_file(csv_file_path, s3_bucket_name, s3_file_key)
+    print(f"File '{csv_file_path}' uploaded to S3 bucket '{s3_bucket_name}' with key '{s3_file_key}'")
+except Exception as e:
+    print(f"Failed to upload file to S3: {e}")
+
+print("Exchange rate has been fetched successfully.")
