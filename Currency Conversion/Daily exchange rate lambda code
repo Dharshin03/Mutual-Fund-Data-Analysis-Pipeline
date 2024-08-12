@@ -1,0 +1,49 @@
+import boto3
+import psycopg2
+
+def lambda_handler(event, context):
+    try:
+        # Extract bucket name and key from the event
+        bucket_name = event['Records'][0]['s3']['bucket']['name']
+        file_key = event['Records'][0]['s3']['object']['key']
+
+        # S3 client
+        s3 = boto3.client('s3')
+        obj = s3.get_object(Bucket=bucket_name, Key=file_key)
+        csv_data = obj['Body'].read().decode('utf-8')
+
+        # Connect to Redshift
+        conn = psycopg2.connect(
+            dbname='dev',
+            user='awsuser1',
+            password='Redshift1',
+            host='redshift-cluster-1.cob9zzlbccm1.ap-south-1.redshift.amazonaws.com',
+            port='5439'
+        )
+        cur = conn.cursor()
+
+        # Copy CSV data to the first table in Redshift
+        copy_cmd_1 = f"""
+        COPY exchangerate
+        FROM 's3://{bucket_name}/{file_key}'
+        # Credentials of access and secret access keys has been removed
+        CSV
+        IGNOREHEADER 1;
+        """
+        cur.execute(copy_cmd_1)
+        conn.commit()
+
+        cur.close()
+        conn.close()
+ 
+        return {
+            'statusCode': 200,
+            'body': 'Data loaded successfully'
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing file: {e}")
+        return {
+            'statusCode': 500,
+            'body': f'Error: {e}'
+        }
