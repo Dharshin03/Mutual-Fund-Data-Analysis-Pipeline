@@ -1,4 +1,4 @@
 # Mutual Fund Data Analysis
-## Capstone Project Group 4
-## Done by Aarush Goyal, Dharshin B, Saniya Manwatkar
+## Capstone Project
+## Done by Dharshin B, Sree Krishna SR
 ## Ganit - June 2024 Batch
